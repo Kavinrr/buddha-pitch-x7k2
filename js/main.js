@@ -7,27 +7,41 @@ const toTop=()=>window.scrollTo(0,0);
 toTop();
 addEventListener('load',()=>{ toTop(); setTimeout(toTop,60); });
 addEventListener('pageshow',e=>{ if(e.persisted) toTop(); });
-const IMG = n => `assets/img/${n}.jpg`;
+const SMALLSCREEN = matchMedia('(max-width:900px)').matches;          // phones / iPad portrait get the lighter files
+const IMG = (n,sfx=null) => `assets/img/${n}${sfx===null ? (SMALLSCREEN?'-m':'') : sfx}.webp`;
+const LQ = window.LQ || {};
+// blur-up: show a tiny blurred copy straight away, swap in the real picture once it has downloaded
+function setBg(el,name,sfx,pos){
+  if(LQ[name]) el.style.backgroundImage = `url(${LQ[name]})`;
+  if(pos) el.style.backgroundPosition = pos;
+  const url = IMG(name,sfx), im = new Image();
+  im.onload = ()=>{ el.style.backgroundImage = `url(${url})`; el.classList.add('img-ready'); };
+  im.src = url;
+}
 const $ = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>[...r.querySelectorAll(s)];
 
-/* ---- paint images + placeholders ---- */
+/* ---- paint images + placeholders (lazy: only load pictures when they are near the screen) ---- */
+const lazyIO = new IntersectionObserver(es=>es.forEach(e=>{
+  if(!e.isIntersecting) return;
+  const el=e.target; lazyIO.unobserve(el);
+  if(el.dataset.mosaic){ el.innerHTML = el.dataset.mosaic.split(',').map(m=>`<div style="background-image:url(${IMG(m.trim(),'-s')})"></div>`).join(''); return; }
+  setBg(el, el.dataset.img);
+}),{rootMargin:'900px 900px'});
 function paint(el){
   const n = el.dataset.img;
-  if(el.dataset.mosaic){
-    el.innerHTML = el.dataset.mosaic.split(',').map(m=>`<div style="background-image:url(${IMG(m.trim())})"></div>`).join('');
-    return;
-  }
+  if(el.dataset.mosaic){ lazyIO.observe(el); return; }
   if(n){
-    el.style.backgroundImage = `url(${IMG(n)})`;
-    const t = document.createElement('em'); t.className='tag'; t.textContent = n+'.jpg'; el.appendChild(t);
+    const t = document.createElement('em'); t.className='tag'; t.textContent = n+'.webp'; el.appendChild(t);
+    if(LQ[n]) el.style.backgroundImage = `url(${LQ[n]})`;
+    lazyIO.observe(el);
   } else {
     el.classList.add('ph');
     el.innerHTML = `<span>${el.dataset.ph || 'Photo TBC'}</span><em class="tag">PLACEHOLDER</em>`;
   }
 }
 $$('[data-img],[data-mosaic]').forEach(paint);
-$('#heroBg').style.backgroundImage = `url(${IMG('buddha-terrace')})`;
+const heroImg=$('#heroImg'); if(heroImg && heroImg.complete) heroImg.classList.add('on');
 
 /* ---- BUDDHA titles: per-letter entrance ---- */
 $$('.title').forEach(t=>{ const txt=t.textContent.trim(); t.setAttribute('aria-label',txt); t.innerHTML=[...txt].map((c,i)=>`<span class="ch" style="--i:${i}" aria-hidden="true">${c}</span>`).join(''); });
@@ -61,14 +75,21 @@ function hud(y,h){
   const ids=$$('main>section'); let cur=0; ids.forEach((x,i)=>{ if(x.getBoundingClientRect().top<innerHeight*.5) cur=i; });
   if(hudSec) hudSec.textContent=`(${f(cur+1)}) ${hudNames[cur]||''}`;
 }
+// light-weight scroll work: one pass per frame, and no parallax / timecode on touch screens
+const FANCY = !SMALLSCREEN && matchMedia('(hover:hover)').matches;
+const heroBgEl = $('#heroBg');
 function onScroll(){
   const y = scrollY, h = document.documentElement.scrollHeight - innerHeight;
   nav.classList.toggle('solid', y>60);
-  prog.style.width = (y/h*100)+'%';
-  hud(y,h);
-  const hb = $('#heroBg'); if(hb && y<innerHeight) hb.style.marginTop = (y*.18)+'px';
+  prog.style.transform = 'scaleX('+(h>0?y/h:0)+')';
+  if(FANCY){
+    hud(y,h);
+    if(heroBgEl && y<innerHeight) heroBgEl.style.translate = '0 '+(y*.18)+'px';
+  }
 }
-addEventListener('scroll', onScroll, {passive:true}); onScroll();
+let scrollTick = false;
+addEventListener('scroll', ()=>{ if(scrollTick) return; scrollTick = true; requestAnimationFrame(()=>{ onScroll(); scrollTick = false; }); }, {passive:true});
+onScroll();
 $('#burger').onclick = ()=>nav.classList.toggle('open');
 $$('#links a').forEach(a=>a.addEventListener('click',()=>nav.classList.remove('open')));
 const secs = $$('main section[id]');
@@ -220,7 +241,7 @@ function renderRail(){
     const li=document.createElement('li');
     li.className='av'+(c.img?'':' ph')+(i===idx?' on':'');
     li.title=c.name;
-    li.innerHTML=`<div style="${c.img?`background-image:url(${IMG(c.img)});background-position:${c.pos||'center 20%'}`:''}"></div>`;
+    li.innerHTML=`<div style="${c.img?`background-image:url(${IMG(c.img,'-s')});background-position:${c.pos||'center 20%'}`:''}"></div>`;
     li.onclick=()=>select(i);
     rail.appendChild(li);
   });
@@ -232,9 +253,9 @@ function select(i){
   portrait.className='portrait'; portrait.innerHTML=''; portrait.style.backgroundImage='';
   void portrait.offsetWidth; // restart animation
   if(c.img){
-    portrait.style.backgroundImage=`url(${IMG(c.img)})`; portrait.style.backgroundPosition=c.pos||'center 20%';
-    silh.className='silh photo'; silh.style.backgroundImage=`url(${IMG(c.img)})`; silh.style.backgroundPosition=c.pos||'center';
-    const t=document.createElement('em'); t.className='tag'; t.textContent=c.img+'.jpg'; portrait.appendChild(t);
+    setBg(portrait,c.img,null,c.pos||'center 20%');
+    silh.className='silh photo'; setBg(silh,c.img,'-s',c.pos||'center');
+    const t=document.createElement('em'); t.className='tag'; t.textContent=c.img+'.webp'; portrait.appendChild(t);
   } else {
     portrait.classList.add('ph');
     portrait.innerHTML=`<span>${c.ph||c.name} · photo TBC</span><em class="tag">PLACEHOLDER</em>`;
@@ -265,6 +286,9 @@ addEventListener('keydown',e=>{
   if(e.key==='ArrowUp'||e.key==='ArrowLeft'){ e.preventDefault(); select((idx-1+list().length)%list().length); }
 });
 renderRail(); select(0);
+/* QA helper: ?probe lists anything wider than the screen */
+if(new URLSearchParams(location.search).has('probe')){ setTimeout(()=>{ const W=document.documentElement.clientWidth, bad=[]; document.querySelectorAll('body *').forEach(e=>{ const r=e.getBoundingClientRect(); if(r.width>0 && (r.right>W+2||r.left<-2) && !e.closest('.reel-track') && !e.closest('.hero-bg') && !e.closest('.grain')) bad.push((e.id?'#'+e.id:e.tagName.toLowerCase()+'.'+(e.className&&e.className.baseVal===undefined?e.className:'')).slice(0,60)+' '+Math.round(r.left)+'..'+Math.round(r.right)); }); const pre=document.createElement('pre'); pre.id='probe'; pre.textContent='W='+W+' scrollW='+document.documentElement.scrollWidth+'\n'+bad.slice(0,25).join('\n'); document.body.appendChild(pre); },1500); }
+
 /* review mode: ?only=story shows one section, fully revealed (used for QA screenshots) */
 const only=new URLSearchParams(location.search).get('only');
 if(only){ const qg=new URLSearchParams(location.search).get('g'), qi=+(new URLSearchParams(location.search).get('i')||0); const qb=new URLSearchParams(location.search).get('b'); if(qb!==null){ const r1=$$('#reel1 .beat')[+qb], r2=$$('#reel2 .beat')[+qb]; setTimeout(()=>{ r1&&r1.click(); r2&&r2.click(); },400); }
